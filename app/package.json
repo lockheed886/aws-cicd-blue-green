@@ -5,13 +5,16 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "jest"
+    "test": "jest",
+    "test:unit": "JEST_JUNIT_OUTPUT_NAME=junit-unit.xml jest tests/math.test.js --reporters=default --reporters=jest-junit",
+    "test:integration": "JEST_JUNIT_OUTPUT_NAME=junit-integration.xml jest tests/api.test.js --reporters=default --reporters=jest-junit"
   },
   "dependencies": {
     "express": "^4.19.2"
   },
   "devDependencies": {
     "jest": "^29.7.0",
+    "jest-junit": "^16.0.0",
     "supertest": "^7.0.0"
   }
 }
