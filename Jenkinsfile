@@ -1,3 +1,4 @@
+@Library('my-shared-library') _
 def failedStage = "Unknown"
 
 pipeline {
