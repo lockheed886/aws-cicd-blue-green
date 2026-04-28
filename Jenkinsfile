@@ -69,13 +69,8 @@ pipeline {
 
     post {
         always {
-            archiveArtifacts artifacts: 'app/**/*', allowEmptyArchive: true
-        }
-        success {
-            slackSend color: 'good', message: "Build SUCCESS: ${env.BUILD_URL}"
-        }
-        failure {
-            slackSend color: 'danger', message: "Build FAILED at stage: ${failedStage} - ${env.BUILD_URL}"
+            // This replaces the old 'slackSend' with your Shared Library 'vars' step
+            notifySlack message: "Build ${currentBuild.fullDisplayName} - ${currentBuild.currentResult}"
         }
     }
 }
