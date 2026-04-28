@@ -69,8 +69,7 @@ pipeline {
 
     post {
         always {
-            // This replaces the old 'slackSend' with your Shared Library 'vars' step
-            notifySlack message: "Build ${currentBuild.fullDisplayName} - ${currentBuild.currentResult}"
+            notifySlack(message: "Build ${currentBuild.fullDisplayName} finished with status: ${currentBuild.currentResult}")
         }
     }
 }
