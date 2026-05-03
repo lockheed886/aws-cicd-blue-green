@@ -32,7 +32,7 @@ pipeline {
                         script { failedStage = 'Unit Tests' }
                         dir('app') {
                             sh 'npm install'
-                            sh 'npm run test:unit'
+                            sh 'npm run test:unit -- --coverage'
                             junit 'junit-unit.xml'
                         }
                     }
@@ -46,6 +46,40 @@ pipeline {
                             junit 'junit-integration.xml'
                         }
                     }
+                }
+            }
+        }
+
+        stage('Static Analysis') {
+            steps {
+                script { failedStage = 'Static Analysis' }
+                // The name 'SonarQube' must match exactly what you typed in Manage Jenkins > System
+                withSonarQubeEnv('SonarQube') {
+                    dir('app') { // Adjust this if your code is not in an 'app' folder
+                        sh '''
+                        # Example using a temporary dockerized scanner if sonar-scanner isn't installed natively
+                        # Replace this with your specific scanner command (e.g., mvn sonar:sonar, npm run sonar, etc.)
+                        
+                        docker run --rm \
+                            -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
+                            -e SONAR_TOKEN="${SONAR_AUTH_TOKEN}" \
+                            -v "${PWD}:/usr/src" \
+                            sonarsource/sonar-scanner-cli \
+                            -Dsonar.projectKey=Assignment-4-App \
+                            -Dsonar.sources=. \
+                            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info # Update based on your language
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate Check') {
+            steps {
+                script { failedStage = 'Quality Gate Check' }
+                // This step listens for the Webhook from SonarQube
+                timeout(time: 10, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
