@@ -20,7 +20,22 @@ pipeline {
             steps {
                 script { failedStage = 'Build' }
                 dir('app') {
-                    sh 'docker build -t my-app-image .'
+                    sh '''
+                    # EMERGENCY RAM FIX: Create 2GB swap space if it doesn't exist
+                    if [ ! -f /swapfile ]; then
+                        echo "Creating Swap Space..."
+                        sudo fallocate -l 2G /swapfile
+                        sudo chmod 600 /swapfile
+                        sudo mkswap /swapfile
+                        sudo swapon /swapfile
+                        echo "Swap Space Created!"
+                    else
+                        echo "Swap Space already exists."
+                    fi
+
+                    # Now run the heavy Docker build
+                    docker build -t my-app-image .
+                    '''
                 }
             }
         }
