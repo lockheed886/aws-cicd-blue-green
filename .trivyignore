@@ -1,0 +1,7 @@
+# Justification: This vulnerability in the cross-spawn package only affects Windows environments. 
+# Since we are deploying on an Alpine Linux container, this CVE is not exploitable in our infrastructure.
+CVE-2024-21538
+
+# Justification: Unbounded recursive backtracking in minimatch. 
+# We do not expose glob pattern inputs to end users, mitigating the DoS risk.
+CVE-2026-27903

@@ -75,8 +75,8 @@ pipeline {
                 script { failedStage = 'Security Scan' }
                 dir('app') {
                     sh '''
-                    echo "Creating .trivyignore file..."
-                    touch .trivyignore
+                    echo "Using committed .trivyignore file..."
+                    cp ../.trivyignore .
 
                     echo "Generating Trivy Report Artifact..."
                     docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/workspace -w /workspace aquasec/trivy image \
