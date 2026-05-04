@@ -6,6 +6,11 @@ pipeline {
 
     environment {
         SLACK_WEBHOOK = credentials('slack-webhook')
+        AWS_ACCOUNT_ID = '461073513531'
+        AWS_REGION = 'us-east-1'
+        ECR_REPO = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/assignment-5-app"
+        GIT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        GIT_BRANCH = env.BRANCH_NAME ?: 'main'
     }
 
     stages {
@@ -16,9 +21,9 @@ pipeline {
             }
         }
 
-        stage('Build') {
+        stage('Container Build') {
             steps {
-                script { failedStage = 'Build' }
+                script { failedStage = 'Container Build' }
                 dir('app') {
                     sh '''
                     # EMERGENCY RAM FIX: Create 2GB swap space if it doesn't exist
@@ -33,8 +38,8 @@ pipeline {
                     echo "Taking out the Docker trash..."
                     docker system prune -af --volumes
 
-                    # Now run the heavy Docker build
-                    docker build -t my-app-image .
+                    echo "Building and Tagging Docker image..."
+                    docker build -t ${ECR_REPO}:${GIT_SHA} -t ${ECR_REPO}:${GIT_BRANCH} .
                     '''
                 }
             }
@@ -65,45 +70,54 @@ pipeline {
             }
         }
 
-        // stage('Static Analysis') {
-        //     steps {
-        //         script { failedStage = 'Static Analysis' }
-        //         // The name 'SonarQube' must match exactly what you typed in Manage Jenkins > System
-        //         withSonarQubeEnv('SonarQube') {
-        //             dir('app') { // Adjust this if your code is not in an 'app' folder
-        //                 sh '''
-        //                 # Example using a temporary dockerized scanner if sonar-scanner isn't installed natively
-        //                 # Replace this with your specific scanner command (e.g., mvn sonar:sonar, npm run sonar, etc.)
-        //                 
-        //                 docker run --rm \
-        //                     -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
-        //                     -e SONAR_TOKEN="${SONAR_AUTH_TOKEN}" \
-        //                     -v "${PWD}:/usr/src" \
-        //                     sonarsource/sonar-scanner-cli \
-        //                     -Dsonar.projectKey=Assignment-4-App \
-        //                     -Dsonar.sources=. \
-        //                     -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info # Update based on your language
-        //                 '''
-        //             }
-        //         }
-        //     }
-        // }
-
-        // stage('Quality Gate Check') {
-        //     steps {
-        //         script { failedStage = 'Quality Gate Check' }
-        //         // This step listens for the Webhook from SonarQube
-        //         timeout(time: 10, unit: 'MINUTES') {
-        //             waitForQualityGate abortPipeline: true
-        //         }
-        //     }
-        // }
-
-        stage('Package') {
+        stage('Security Scan') {
             steps {
-                script { failedStage = 'Package' }
+                script { failedStage = 'Security Scan' }
                 dir('app') {
-                    sh 'docker tag my-app-image my-app-image:latest'
+                    sh '''
+                    echo "Creating .trivyignore file..."
+                    touch .trivyignore
+
+                    echo "Generating Trivy Report Artifact..."
+                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/workspace -w /workspace aquasec/trivy image \
+                        --severity HIGH,CRITICAL \
+                        --ignore-unfixed \
+                        --format table \
+                        --output trivy-report.txt \
+                        ${ECR_REPO}:${GIT_SHA}
+                        
+                    cat trivy-report.txt
+
+                    echo "Enforcing Quality Gate..."
+                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/workspace -w /workspace aquasec/trivy image \
+                        --severity HIGH,CRITICAL \
+                        --ignore-unfixed \
+                        --exit-code 1 \
+                        ${ECR_REPO}:${GIT_SHA}
+                    '''
+                }
+            }
+            post {
+                always {
+                    dir('app') {
+                        archiveArtifacts artifacts: 'trivy-report.txt', allowEmptyArchive: true
+                    }
+                }
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                script { failedStage = 'Push to ECR' }
+                dir('app') {
+                    sh '''
+                    echo "Authenticating to AWS ECR..."
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    
+                    echo "Pushing images to ECR..."
+                    docker push ${ECR_REPO}:${GIT_SHA}
+                    docker push ${ECR_REPO}:${GIT_BRANCH}
+                    '''
                 }
             }
         }
