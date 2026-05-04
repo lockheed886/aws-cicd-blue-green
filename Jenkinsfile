@@ -10,7 +10,7 @@ pipeline {
         AWS_REGION = 'us-east-1'
         ECR_REPO = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/assignment-5-app"
         GIT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-        GIT_BRANCH = env.BRANCH_NAME ?: 'main'
+        GIT_BRANCH = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
     }
 
     stages {
