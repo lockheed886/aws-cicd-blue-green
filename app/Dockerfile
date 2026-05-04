@@ -1,7 +1,7 @@
 # ==========================================
 # STAGE 1: Builder
 # ==========================================
-FROM node:14-alpine AS builder
+FROM node:18-alpine AS builder
 WORKDIR /usr/src/app
 
 # Copy package files and install dependencies
@@ -15,7 +15,7 @@ COPY . .
 # ==========================================
 # STAGE 2: Minimal Runtime
 # ==========================================
-FROM node:14-alpine
+FROM node:18-alpine
 WORKDIR /usr/src/app
 
 # Copy ONLY the necessary files from the builder stage
