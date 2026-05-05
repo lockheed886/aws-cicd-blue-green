@@ -1,134 +1,89 @@
-@Library('my-shared-library') _
-def failedStage = "Unknown"
-
 pipeline {
-    agent { label 'linux-agent' }
+    agent { label 'linux-agent' } // Uses your existing EC2 agent
 
-    environment {
-        SLACK_WEBHOOK = credentials('slack-webhook')
-        AWS_ACCOUNT_ID = '461073513531'
-        AWS_REGION = 'us-east-1'
-        ECR_REPO = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/assignment-5-app"
-        GIT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-        GIT_BRANCH = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+    parameters {
+        choice(name: 'ACTION', choices: ['plan', 'apply', 'destroy'], description: 'Terraform action to perform')
+        booleanParam(name: 'AUTO_APPROVE', defaultValue: false, description: 'Skip manual approval?')
     }
 
     stages {
         stage('Checkout') {
             steps {
-                script { failedStage = 'Checkout' }
                 checkout scm
             }
         }
 
-        stage('Container Build') {
+        stage('Fmt & Validate') {
             steps {
-                script { failedStage = 'Container Build' }
-                dir('app') {
-                    sh '''
-                    # EMERGENCY RAM FIX: Create 2GB swap space if it doesn't exist
-                    if [ ! -f /swapfile ]; then
-                        sudo fallocate -l 2G /swapfile
-                        sudo chmod 600 /swapfile
-                        sudo mkswap /swapfile
-                        sudo swapon /swapfile
-                    fi
-
-                    # EMERGENCY DISK FIX: Delete old, unused Docker images to free up space
-                    echo "Taking out the Docker trash..."
-                    docker system prune -af --volumes
-
-                    echo "Building and Tagging Docker image..."
-                    docker build -t ${ECR_REPO}:${GIT_SHA} -t ${ECR_REPO}:${GIT_BRANCH} .
-                    '''
-                }
-            }
-        }
-
-        stage('Test') {
-            parallel {
-                stage('Unit Tests') {
-                    steps {
-                        script { failedStage = 'Unit Tests' }
-                        dir('app') {
-                            sh 'npm install'
-                            sh 'npm run test:unit -- --coverage'
-                            junit 'junit-unit.xml'
-                        }
-                    }
-                }
-                stage('Integration Tests') {
-                    steps {
-                        script { failedStage = 'Integration Tests' }
-                        dir('app') {
-                            sh 'npm install'
-                            sh 'npm run test:integration'
-                            junit 'junit-integration.xml'
-                        }
-                    }
-                }
+                echo "Initializing Terraform modules..."
+                sh 'terraform init -backend=false' 
+                
+                echo "Checking Formatting and Validation..."
+                sh 'terraform fmt -check'
+                sh 'terraform validate'
             }
         }
 
         stage('Security Scan') {
             steps {
-                dir('app') {
-                    sh '''
-                    echo "EMERGENCY BYPASS: AWS Server out of CPU credits."
-                    echo "Mocking successful Trivy scan to allow ECR push..."
-                    
-                    # Use a new filename to avoid the 'root' permission lock
-                    echo "==========================================================" > emergency-report.txt
-                    echo "Trivy Scan Results (MOCKED FOR DEADLINE)" >> emergency-report.txt
-                    echo "Total: 0 (HIGH: 0, CRITICAL: 0)" >> emergency-report.txt
-                    echo "==========================================================" >> emergency-report.txt
-                    
-                    cat emergency-report.txt
-                    
-                    exit 0
-                    '''
-                }
+                echo "Running tfsec Security Scan..."
+                // Runs tfsec via Docker so you don't have to install it. 
+                // Pipes output to file and fails build if HIGH/CRITICAL found.
+                sh '''
+                docker run --rm -v $(pwd):/src -w /src aquasec/tfsec . --minimum-severity HIGH | tee tfsec-report.txt
+                '''
             }
             post {
                 always {
-                    dir('app') {
-                        // Make sure to archive the new file name here too!
-                        archiveArtifacts artifacts: 'emergency-report.txt', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'tfsec-report.txt', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Plan') {
+            steps {
+                echo "Initializing AWS Backend..."
+                sh 'terraform init'
+                
+                script {
+                    if (params.ACTION == 'destroy') {
+                        sh 'terraform plan -destroy -out=tfplan'
+                    } else {
+                        sh 'terraform plan -out=tfplan'
                     }
                 }
+                
+                // Archive the binary plan file
+                archiveArtifacts artifacts: 'tfplan', allowEmptyArchive: true
             }
         }
 
-        stage('Push to ECR') {
+        stage('Manual Approval') {
+            when {
+                expression {
+                    // Only ask for approval if AUTO_APPROVE is false AND we are applying/destroying
+                    return params.AUTO_APPROVE == false && (params.ACTION == 'apply' || params.ACTION == 'destroy')
+                }
+            }
             steps {
-                dir('app') {
-                    sh '''
-                    echo "Installing AWS CLI..."
-                    sudo apt-get update
-                    sudo apt-get install -y awscli
-
-                    echo "Authenticating to AWS ECR..."
-                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-                    
-                    echo "Pushing images to ECR..."
-                    docker push ${ECR_REPO}:${GIT_SHA}
-                    docker push ${ECR_REPO}:${GIT_BRANCH}
-                    '''
+                timeout(time: 30, unit: 'MINUTES') {
+                    // 📸 Take your screenshot of this prompt when it pops up!
+                    input message: "Approve Terraform ${params.ACTION}?", ok: "Approve"
                 }
             }
         }
 
-        stage('Deploy') {
-            steps {
-                script { failedStage = 'Deploy' }
-                echo 'Deploying...'
+        stage('Apply/Destroy') {
+            when {
+                expression {
+                    return params.ACTION == 'apply' || params.ACTION == 'destroy'
+                }
             }
-        }
-    }
-
-    post {
-        always {
-            notifySlack(message: "Build ${currentBuild.fullDisplayName} finished with status: ${currentBuild.currentResult}")
+            steps {
+                echo "Executing Plan..."
+                // Apply the exact binary plan we generated earlier
+                sh 'terraform apply -auto-approve tfplan'
+            }
         }
     }
 }
