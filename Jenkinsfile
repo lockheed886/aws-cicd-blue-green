@@ -101,9 +101,12 @@ pipeline {
 
         stage('Push to ECR') {
             steps {
-                script { failedStage = 'Push to ECR' }
                 dir('app') {
                     sh '''
+                    echo "Installing AWS CLI..."
+                    sudo apt-get update
+                    sudo apt-get install -y awscli
+
                     echo "Authenticating to AWS ECR..."
                     aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
                     
